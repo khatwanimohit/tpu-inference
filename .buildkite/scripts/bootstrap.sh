@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+echo "test update"
 # --- Skip build if only docs/icons changed ---
 echo "--- :git: Checking changed files"
 
