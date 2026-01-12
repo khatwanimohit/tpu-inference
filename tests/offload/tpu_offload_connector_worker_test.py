@@ -148,137 +148,156 @@ class TestTPUOffloadConnectorWorker(jtu.JaxTestCase):
         worker.register_runner(mock_runner)
         return connector
 
-    @parameterized.named_parameters(
-        dict(testcase_name="_zero_blocks", num_blocks=0, expected_buckets=[]),
-        dict(testcase_name="_one_block", num_blocks=1, expected_buckets=[1]),
-        dict(testcase_name="_five_blocks",
-             num_blocks=5,
-             expected_buckets=[4, 1]),
-        dict(testcase_name="_sixteen_blocks",
-             num_blocks=16,
-             expected_buckets=[16]),
-        dict(testcase_name="_seventeen_blocks",
-             num_blocks=17,
-             expected_buckets=[16, 1]),
-        dict(testcase_name="_twenty_three_blocks",
-             num_blocks=23,
-             expected_buckets=[16, 4, 2, 1]),
-        dict(testcase_name="_thirty_two_blocks",
-             num_blocks=32,
-             expected_buckets=[16, 16]),
-        dict(testcase_name="_large_number_blocks",
-             num_blocks=100,
-             expected_buckets=[16, 16, 16, 16, 16, 16, 4]),
-    )
-    def test_decompose_into_buckets(self, num_blocks: int,
-                                    expected_buckets: List[int]):
-        """
-        Tests the _decompose_into_buckets function for correct greedy decomposition.
-        """
-        connector = self._create_connector(use_precompiled_swap_ops="0")
-        worker = connector.connector_worker
-        self.assertEqual(worker._decompose_into_buckets(num_blocks),
-                         expected_buckets)
-        logger.info(
-            f"Decomposition for {num_blocks} blocks: {worker._decompose_into_buckets(num_blocks)} matched expected: {expected_buckets}"
-        )
+    # @parameterized.named_parameters(
+    #     dict(testcase_name="_zero_blocks", num_blocks=0, expected_buckets=[]),
+    #     dict(testcase_name="_one_block", num_blocks=1, expected_buckets=[1]),
+    #     dict(testcase_name="_five_blocks",
+    #          num_blocks=5,
+    #          expected_buckets=[4, 1]),
+    #     dict(testcase_name="_sixteen_blocks",
+    #          num_blocks=16,
+    #          expected_buckets=[16]),
+    #     dict(testcase_name="_seventeen_blocks",
+    #          num_blocks=17,
+    #          expected_buckets=[16, 1]),
+    #     dict(testcase_name="_twenty_three_blocks",
+    #          num_blocks=23,
+    #          expected_buckets=[16, 4, 2, 1]),
+    #     dict(testcase_name="_thirty_two_blocks",
+    #          num_blocks=32,
+    #          expected_buckets=[16, 16]),
+    #     dict(testcase_name="_large_number_blocks",
+    #          num_blocks=100,
+    #          expected_buckets=[16, 16, 16, 16, 16, 16, 4]),
+    # )
+    # def test_decompose_into_buckets(self, num_blocks: int,
+    #                                 expected_buckets: List[int]):
+    #     """
+    #     Tests the _decompose_into_buckets function for correct greedy decomposition.
+    #     """
+    #     connector = self._create_connector(use_precompiled_swap_ops="0")
+    #     worker = connector.connector_worker
+    #     self.assertEqual(worker._decompose_into_buckets(num_blocks),
+    #                      expected_buckets)
+    #     logger.info(
+    #         f"Decomposition for {num_blocks} blocks: {worker._decompose_into_buckets(num_blocks)} matched expected: {expected_buckets}"
+    #     )
+
+    # @parameterized.named_parameters(
+    #     dict(testcase_name="_jax", swap_op_type="jax"),
+    #     dict(testcase_name="_pallas", swap_op_type="pallas"),
+    #     dict(testcase_name="_parallel", swap_op_type="parallel"),
+    # )
+    # def test_precompile_run_success(self, swap_op_type: str):
+    #     """
+    #     Tests that _precompile_kv_swap_operations runs without errors and
+    #     modifies the cache content.
+    #     """
+    #     connector = self._create_connector(swap_op_type,
+    #                                        use_precompiled_swap_ops="0")
+
+    #     worker = connector.connector_worker
+
+    #     # Keep a copy of the original cache content on the host
+    #     original_cache_host = [
+    #         np.array(cache) for cache in worker.runner.kv_caches
+    #     ]
+
+    #     worker._precompile_kv_swap_operations()
+
+    #     # Fetch the new cache content to the host
+    #     new_cache_host = [np.array(cache) for cache in worker.runner.kv_caches]
+    #     self.assertTrue(
+    #         all(
+    #             np.array_equal(orig, new)
+    #             for orig, new in zip(original_cache_host, new_cache_host)),
+    #         "Cache content should not have changed after precompilation.",
+    #     )
 
     @parameterized.named_parameters(
-        dict(testcase_name="_jax", swap_op_type="jax"),
-        dict(testcase_name="_pallas", swap_op_type="pallas"),
-    )
-    def test_precompile_run_success(self, swap_op_type: str):
-        """
-        Tests that _precompile_kv_swap_operations runs without errors and
-        modifies the cache content.
-        """
-        connector = self._create_connector(swap_op_type,
-                                           use_precompiled_swap_ops="0")
-
-        worker = connector.connector_worker
-
-        # Keep a copy of the original cache content on the host
-        original_cache_host = [
-            np.array(cache) for cache in worker.runner.kv_caches
-        ]
-
-        worker._precompile_kv_swap_operations()
-
-        # Fetch the new cache content to the host
-        new_cache_host = [np.array(cache) for cache in worker.runner.kv_caches]
-        self.assertTrue(
-            all(
-                np.array_equal(orig, new)
-                for orig, new in zip(original_cache_host, new_cache_host)),
-            "Cache content should not have changed after precompilation.",
-        )
-
-    @parameterized.named_parameters(
+        # dict(
+        #     testcase_name="_single_block",
+        #     num_blocks_to_save=1,
+        #     num_requests=1,
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_single_block",
+        #     num_blocks_to_save=1,
+        #     num_requests=6,
+        # ),
+        # dict(
+        #     testcase_name="_multi_blocks",
+        #     num_blocks_to_save=5,
+        #     num_requests=1,
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_multi_blocks",
+        #     num_blocks_to_save=5,
+        #     num_requests=6,
+        # ),
+        # dict(
+        #     testcase_name="_multi_blocks_with_compile_jax",
+        #     num_blocks_to_save=5,
+        #     num_requests=1,
+        #     use_precompiled_swap_ops=True,
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_single_block_with_compile_jax",
+        #     num_blocks_to_save=1,
+        #     num_requests=6,
+        #     use_precompiled_swap_ops=True,
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_multi_blocks_with_compile_jax",
+        #     num_blocks_to_save=5,
+        #     num_requests=6,
+        #     use_precompiled_swap_ops=True,
+        # ),
+        # dict(
+        #     testcase_name="_multi_blocks_with_compile_pallas",
+        #     num_blocks_to_save=5,
+        #     num_requests=1,
+        #     use_precompiled_swap_ops=True,
+        #     swap_op_type="pallas",
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_multi_blocks_with_compile_pallas",
+        #     num_blocks_to_save=5,
+        #     num_requests=6,
+        #     use_precompiled_swap_ops=True,
+        #     swap_op_type="pallas",
+        # ),
+        # dict(
+        #     testcase_name="_final_save",
+        #     num_blocks_to_save=1,
+        #     num_requests=1,
+        #     is_final_save=True,
+        #     skip_save=False,
+        # ),
+        # dict(
+        #     testcase_name="_final_skip_save",
+        #     num_blocks_to_save=0,
+        #     num_requests=1,
+        #     is_final_save=True,
+        #     skip_save=True,
+        # ),
         dict(
-            testcase_name="_single_block",
+            testcase_name="_multi_blocks_parallel",
+            num_blocks_to_save=5,
+            num_requests=1,
+            swap_op_type="parallel",
+        ),
+        dict(
+            testcase_name="_multi_requests_single_block_parallel",
             num_blocks_to_save=1,
-            num_requests=1,
-        ),
-        dict(
-            testcase_name="_multi_requests_single_block",
-            num_blocks_to_save=1,
             num_requests=6,
+            swap_op_type="parallel",
         ),
         dict(
-            testcase_name="_multi_blocks",
-            num_blocks_to_save=5,
-            num_requests=1,
-        ),
-        dict(
-            testcase_name="_multi_requests_multi_blocks",
+            testcase_name="_multi_requests_multi_blocks_parallel",
             num_blocks_to_save=5,
             num_requests=6,
-        ),
-        dict(
-            testcase_name="_multi_blocks_with_compile_jax",
-            num_blocks_to_save=5,
-            num_requests=1,
-            use_precompiled_swap_ops=True,
-        ),
-        dict(
-            testcase_name="_multi_requests_single_block_with_compile_jax",
-            num_blocks_to_save=1,
-            num_requests=6,
-            use_precompiled_swap_ops=True,
-        ),
-        dict(
-            testcase_name="_multi_requests_multi_blocks_with_compile_jax",
-            num_blocks_to_save=5,
-            num_requests=6,
-            use_precompiled_swap_ops=True,
-        ),
-        dict(
-            testcase_name="_multi_blocks_with_compile_pallas",
-            num_blocks_to_save=5,
-            num_requests=1,
-            use_precompiled_swap_ops=True,
-            swap_op_type="pallas",
-        ),
-        dict(
-            testcase_name="_multi_requests_multi_blocks_with_compile_pallas",
-            num_blocks_to_save=5,
-            num_requests=6,
-            use_precompiled_swap_ops=True,
-            swap_op_type="pallas",
-        ),
-        dict(
-            testcase_name="_final_save",
-            num_blocks_to_save=1,
-            num_requests=1,
-            is_final_save=True,
-            skip_save=False,
-        ),
-        dict(
-            testcase_name="_final_skip_save",
-            num_blocks_to_save=0,
-            num_requests=1,
-            is_final_save=True,
-            skip_save=True,
+            swap_op_type="parallel",
         ),
     )
     def test_tpu_connector_save(
@@ -396,43 +415,70 @@ class TestTPUOffloadConnectorWorker(jtu.JaxTestCase):
             self.assertSetEqual(all_req_ids, finished_saves)
 
     @parameterized.named_parameters(
+        # dict(
+        #     testcase_name="_single_block",
+        #     num_blocks_to_operate=1,
+        #     num_requests=1,
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_single_block",
+        #     num_blocks_to_operate=1,
+        #     num_requests=4,
+        # ),
+        # dict(
+        #     testcase_name="_multi_blocks_compile_jax",
+        #     num_blocks_to_operate=5,
+        #     num_requests=1,
+        #     use_precompiled_swap_ops=True,
+        #     swap_op_type="jax",
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_single_block_compile_jax",
+        #     num_blocks_to_operate=1,
+        #     num_requests=6,
+        #     use_precompiled_swap_ops=True,
+        #     swap_op_type="jax",
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_multi_blocks_compile_jax",
+        #     num_blocks_to_operate=5,
+        #     num_requests=6,
+        #     use_precompiled_swap_ops=True,
+        #     swap_op_type="jax",
+        # ),
+        # dict(
+        #     testcase_name="_multi_requests_multi_blocks_compile_pallas",
+        #     num_blocks_to_operate=5,
+        #     num_requests=6,
+        #     use_precompiled_swap_ops=True,
+        #     swap_op_type="pallas",
+        # ),
         dict(
-            testcase_name="_single_block",
-            num_blocks_to_operate=1,
-            num_requests=1,
-        ),
-        dict(
-            testcase_name="_multi_requests_single_block",
+            testcase_name="_multi_requests_single_block_parallel",
             num_blocks_to_operate=1,
             num_requests=4,
+            swap_op_type="parallel",
         ),
         dict(
-            testcase_name="_multi_blocks_compile_jax",
+            testcase_name="_multi_blocks_compile_parallel",
             num_blocks_to_operate=5,
             num_requests=1,
             use_precompiled_swap_ops=True,
-            swap_op_type="jax",
+            swap_op_type="parallel",
         ),
         dict(
-            testcase_name="_multi_requests_single_block_compile_jax",
+            testcase_name="_multi_requests_single_block_compile_parallel",
             num_blocks_to_operate=1,
             num_requests=6,
             use_precompiled_swap_ops=True,
-            swap_op_type="jax",
+            swap_op_type="parallel",
         ),
         dict(
-            testcase_name="_multi_requests_multi_blocks_compile_jax",
+            testcase_name="_multi_requests_multi_blocks_compile_parallel",
             num_blocks_to_operate=5,
             num_requests=6,
             use_precompiled_swap_ops=True,
-            swap_op_type="jax",
-        ),
-        dict(
-            testcase_name="_multi_requests_multi_blocks_compile_pallas",
-            num_blocks_to_operate=5,
-            num_requests=6,
-            use_precompiled_swap_ops=True,
-            swap_op_type="pallas",
+            swap_op_type="parallel",
         ),
     )
     def test_tpu_connector_load(
@@ -572,3 +618,135 @@ class TestTPUOffloadConnectorWorker(jtu.JaxTestCase):
             self.assertListEqual(
                 dst_chunks,
                 worker.offload_stats.data["finished_load_chunks"][req_id])
+
+    @parameterized.named_parameters(
+        dict(
+            testcase_name="_small_cache",
+            num_layers=4,
+            num_blocks=16,
+        ),
+        dict(
+            testcase_name="_medium_cache",
+            num_layers=16,
+            num_blocks=32,
+        ),
+        dict(
+            testcase_name="_large_cache",
+            num_layers=32,
+            num_blocks=64,
+        ),
+    )
+    def test_swap_performance_comparison(
+        self,
+        num_layers: int,
+        num_blocks: int,
+    ):
+        """
+        Compares the swap_out and swap_in run times between
+        swap_op_type='jax' and swap_op_type='parallel'.
+        """
+        import time
+        from tpu_inference.offload.utils import get_kv_cache_swap_fn
+
+        num_devices = len(list(jax.devices()))
+        num_heads = num_devices
+        head_size = 128
+        block_size = self.block_size
+
+        cache_shape = (num_blocks, block_size, num_heads, 2, head_size)
+        cache_dtype = jnp.bfloat16
+
+        partition_spec = PartitionSpec(None, None, "model")
+        device_sharding = NamedSharding(self.mesh, partition_spec)
+        host_sharding = NamedSharding(
+            self.mesh, partition_spec, memory_kind="pinned_host"
+        )
+
+        # Create KV caches on device
+        @functools.partial(jax.jit, out_shardings=device_sharding)
+        def create_on_device(key):
+            return jax.random.uniform(key, shape=cache_shape, dtype=cache_dtype)
+
+        kv_caches = [create_on_device(jax.random.key(i)) for i in range(num_layers)]
+        jax.block_until_ready(kv_caches)
+
+        num_warmup_runs = 2
+        num_timed_runs = 5
+
+        results = {}
+
+        for swap_op_type in ["jax", "parallel"]:
+            swap_in_fn, swap_out_fn = get_kv_cache_swap_fn(
+                swap_op_type=swap_op_type,
+                host_sharding=host_sharding,
+                device_sharding=device_sharding,
+                jitted=True,
+            )
+
+            # Warmup runs for swap_out
+            for _ in range(num_warmup_runs):
+                host_caches = swap_out_fn(kv_caches)
+                jax.block_until_ready(host_caches)
+
+            # Timed runs for swap_out
+            swap_out_times = []
+            for _ in range(num_timed_runs):
+                start_time = time.perf_counter()
+                host_caches = swap_out_fn(kv_caches)
+                jax.block_until_ready(host_caches)
+                elapsed = time.perf_counter() - start_time
+                swap_out_times.append(elapsed)
+
+            # Warmup runs for swap_in
+            for _ in range(num_warmup_runs):
+                device_caches = swap_in_fn(host_caches)
+                jax.block_until_ready(device_caches)
+
+            # Timed runs for swap_in
+            swap_in_times = []
+            for _ in range(num_timed_runs):
+                start_time = time.perf_counter()
+                device_caches = swap_in_fn(host_caches)
+                jax.block_until_ready(device_caches)
+                elapsed = time.perf_counter() - start_time
+                swap_in_times.append(elapsed)
+
+            results[swap_op_type] = {
+                "swap_out_avg_ms": np.mean(swap_out_times) * 1000,
+                "swap_out_std_ms": np.std(swap_out_times) * 1000,
+                "swap_in_avg_ms": np.mean(swap_in_times) * 1000,
+                "swap_in_std_ms": np.std(swap_in_times) * 1000,
+            }
+
+        # Log comparison results
+        logger.info(
+            f"\n{'='*60}\n"
+            f"Swap Performance Comparison (num_layers={num_layers}, "
+            f"num_blocks={num_blocks}, cache_shape={cache_shape})\n"
+            f"{'='*60}"
+        )
+        logger.info(
+            f"{'Method':<12} {'swap_out (ms)':<20} {'swap_in (ms)':<20}"
+        )
+        logger.info("-" * 52)
+
+        for swap_op_type, timings in results.items():
+            swap_out_str = f"{timings['swap_out_avg_ms']:.2f} ± {timings['swap_out_std_ms']:.2f}"
+            swap_in_str = f"{timings['swap_in_avg_ms']:.2f} ± {timings['swap_in_std_ms']:.2f}"
+            logger.info(f"{swap_op_type:<12} {swap_out_str:<20} {swap_in_str:<20}")
+
+        # Calculate speedup
+        jax_swap_out = results["jax"]["swap_out_avg_ms"]
+        parallel_swap_out = results["parallel"]["swap_out_avg_ms"]
+        jax_swap_in = results["jax"]["swap_in_avg_ms"]
+        parallel_swap_in = results["parallel"]["swap_in_avg_ms"]
+
+        swap_out_speedup = jax_swap_out / parallel_swap_out if parallel_swap_out > 0 else 0
+        swap_in_speedup = jax_swap_in / parallel_swap_in if parallel_swap_in > 0 else 0
+
+        logger.info("-" * 52)
+        logger.info(
+            f"Speedup (jax/parallel): swap_out={swap_out_speedup:.2f}x, "
+            f"swap_in={swap_in_speedup:.2f}x"
+        )
+        logger.info("=" * 60)

@@ -112,7 +112,7 @@ class TestTPUOffloadUtilsFn(unittest.TestCase):
         Verify that swap-out and swap-in functions work correctly for different
         swap_op_types and jitted options.
         """
-        swap_op_types = ["jax", "pallas"]
+        swap_op_types = ["jax", "pallas", "parallel"]
         jitted_options = [True, False]
 
         # NOTE(jcgu): we are using the entire kv cache [n_b, bs, nh, 2, hd],
