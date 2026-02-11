@@ -6,10 +6,12 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Tuple
 
 import jax
+import jax.numpy as jnp
 import jaxlib
 import jaxtyping
 import vllm.envs as vllm_envs
 from vllm.config import VllmConfig, set_current_vllm_config
+from vllm.distributed import get_pp_group
 from vllm.distributed.kv_transfer import (ensure_kv_transfer_initialized,
                                           has_kv_transfer_group)
 from vllm.distributed.parallel_state import (ensure_model_parallel_initialized,
@@ -17,23 +19,74 @@ from vllm.distributed.parallel_state import (ensure_model_parallel_initialized,
 from vllm.lora.request import LoRARequest
 from vllm.tasks import SupportedTask
 from vllm.v1 import utils as vllm_utils
+from vllm.v1.core.kv_cache_utils import get_num_blocks, get_uniform_page_size
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
 
 from tpu_inference import envs, utils
 from tpu_inference.distributed import jax_parallel_state
-from tpu_inference.distributed.jax_parallel_state import get_pp_group
-from tpu_inference.distributed.utils import (get_device_topology_order_id,
-                                             get_host_ip, get_kv_transfer_port)
+from tpu_inference.distributed.utils import (get_host_ip, get_kv_transfer_port,
+                                             get_node_id)
 from tpu_inference.layers.common.sharding import ShardingConfigManager
 from tpu_inference.logger import init_logger
 from tpu_inference.models.jax.jax_intermediate_tensor import \
     JaxIntermediateTensors
+from tpu_inference.runner.kv_cache import get_attention_page_size_bytes
 from tpu_inference.runner.tpu_runner import TPUModelRunner
+from flax.linen import partitioning as nn_partitioning
 
 logger = init_logger(__name__)
 
+_DTYPE: dict[str, jnp.dtype] = {
+    "bfloat16": jnp.bfloat16,
+    "float": jnp.float32,
+    "float32": jnp.float32,
+}
+
+MAXTEXT_LOGICAL_AXIS_RULES = [
+                      ['activation_batch', ['expert']],
+                      ['activation_batch_no_exp', []],
+                      ['activation_embed_and_logits_batch', ['expert']],
+                      ['activation_embed_and_logits_batch_sequence', ['expert']],
+                      ['activation_heads', ['model']],
+                      ['activation_kv_heads', ['model']],
+                      ['activation_attn_length', ['expert']],
+                      ['activation_attn_length_no_exp', []],
+                      ['activation_length', ['data', 'expert']],
+                      ['activation_length_no_exp', 'data'],
+                      ['activation_q_length', ['expert']],
+                      ['activation_attn_embed', 'model'],
+                      ['activation_embed', ['model', 'attn_dp']],
+                      ['activation_mlp', ['model', 'attn_dp']],
+                      ['activation_kv', ['model']],
+                      ['activation_prefill_kv_batch', ['expert']],
+                      ['activation_kv_batch', ['expert']],
+                      ['activation_kv_batch_no_exp', []],
+                      ['activation_kv_head_dim', ['model']],
+                      ['activation_vocab', ['model', 'attn_dp']],
+                      ['activation_norm_length', []],
+                      ['activation_exp', ['expert']],
+                      ['decode_batch', ['expert']],
+                      ['decode_length', []],
+                      ['mlp', ['model', 'attn_dp']],
+                      ['mlp_no_fsdp', ['model', 'attn_dp']],
+                      ['vocab', ['model', 'attn_dp']],
+                      ['heads', ['model']],
+                      ['q_heads', ['model']],
+                      ['kv_heads', ['model']],
+                      ['kv_head_dim', []],
+                      ['kv', []],
+                      ['embed', ['expert']],
+                      ['embed_tensor_transpose', ['attn_dp', 'model']],
+                      ['embed_no_exp', []],
+                      ['q_lora', ['expert']],
+                      ['kv_lora', ['expert']],
+                      ['norm', []],
+                      ['cache_heads', ['model']],
+                      ['exp', ['expert']],
+                      ['paged_kv_heads', ['model']],
+                    ]
 
 @dataclass
 class PPConfig:
@@ -68,6 +121,21 @@ class TPUWorker:
         ip: str = "localhost",
         prev_worker_ip: str = "localhost",
     ):
+        # If we use vLLM's model implementation in PyTorch, we should set it
+        # with torch version of the dtype.
+        impl = envs.MODEL_IMPL_TYPE
+        if impl != "vllm":  # vllm-pytorch implementation does not need this conversion
+
+            # NOTE(wenlong): because sometimes mm needs to use torch for preprocessing
+            if not isinstance(vllm_config.model_config.dtype, str):
+                logger.warning(
+                    "The model dtype is not properly set for JAX backend. "
+                    "Overwriting it to jnp.bfloat16")
+                vllm_config.model_config.dtype = jnp.bfloat16
+            else:
+                vllm_config.model_config.dtype = _DTYPE.get(
+                    vllm_config.model_config.dtype, jnp.bfloat16)
+
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.parallel_config = vllm_config.parallel_config
@@ -82,12 +150,11 @@ class TPUWorker:
         self.pp_config = PPConfig(rank, ip, prev_worker_ip,
                                   self.parallel_config.pipeline_parallel_size)
 
-        # Explicitly trigger RunAI download on the worker if needed.
-        # This handles downloading config.json and other non-weight files to the
-        # worker's local cache before VllmModelWrapper initialization.
-        if hasattr(self.model_config, "maybe_pull_model_tokenizer_for_runai"):
-            self.model_config.maybe_pull_model_tokenizer_for_runai(
-                self.model_config.model, self.model_config.tokenizer)
+        if self.model_config.trust_remote_code:
+            # note: lazy import to avoid importing torch before initializing
+            from vllm.utils.import_utils import init_cached_hf_modules
+
+            init_cached_hf_modules()
 
         # Delay profiler initialization to the start of the profiling.
         # This is because in vLLM V1, MP runtime is initialized before the
@@ -230,16 +297,9 @@ class TPUWorker:
 
         is_first_rank = True
         is_last_rank = True
-        self.topology_order_id = self.rank
         if self.parallel_config.pipeline_parallel_size > 1:
             is_first_rank = self.rank == 0
             is_last_rank = self.rank == self.pp_config.pp_world_size - 1
-        else:
-            # topology_order_id is used to determine the KV cache
-            # mapping between P/D workers
-            if multihost_backend == "ray":
-                self.topology_order_id = get_device_topology_order_id(
-                    jax.local_devices(), jax.devices())
 
         self.model_runner = TPUModelRunner(self.vllm_config, self.devices,
                                            self.rank, is_first_rank,
@@ -248,12 +308,9 @@ class TPUWorker:
                     f"rank={self.rank} | "
                     f"is_first_rank={is_first_rank} | "
                     f"is_last_rank={is_last_rank} | "
-                    f"topology_order_id={self.topology_order_id} | "
+                    f"node_id={get_node_id()} | "
                     f"is_driver_worker={self.is_driver_worker} | "
-                    f"hbm={utils.hbm_usage_gb(self.devices)}GiB |"
-                    f"self.devices={self.devices} | "
-                    f"total devices={jax.devices()} | "
-                    f"local_devices={jax.local_devices()}")
+                    f"hbm={utils.hbm_usage_gb(self.devices)}GiB")
         vllm_utils.report_usage_stats(self.vllm_config)
 
     def initialize_pp_transfer_connect(self):
@@ -276,6 +333,25 @@ class TPUWorker:
         total_hbm_limit_gb = round(total_hbm_limit / utils.GBYTES, 2)
         total_hbm_limit_cap_gb = round(total_hbm_limit_cap / utils.GBYTES, 2)
         total_hbm_used_gb = round(total_hbm_used / utils.GBYTES, 2)
+
+        if self.vllm_config.kv_transfer_config is not None:
+            kv_transfer_config = self.vllm_config.kv_transfer_config
+            if kv_transfer_config.kv_connector == "TPUOffloadConnector" and \
+               kv_transfer_config.kv_connector_module_path == "tpu_inference.offload.tpu_offload_connector":
+                # If kv offloading is enabled, we need to account for the memory used by the KV transfer buffer.
+                staging_buffer_pages = envs.TPU_OFFLOAD_NUM_STAGING_BLOCKS
+
+                kv_cache_specs = self.model_runner.get_kv_cache_spec()
+                num_layers = len(kv_cache_specs)
+                vllm_page_size_bytes = get_uniform_page_size(
+                    list(kv_cache_specs.values()))
+                stage_buffer_size_bytes = staging_buffer_pages * num_layers * vllm_page_size_bytes
+
+                total_hbm_avail = total_hbm_avail - stage_buffer_size_bytes
+                logger.info(
+                    f"  ALERT: KV offloading enabled. Deducting {stage_buffer_size_bytes} Bytes ({staging_buffer_pages} pages) from available HBM for staging buffer."
+                )
+
         total_hbm_avail_gb = round(total_hbm_avail / utils.GBYTES, 2)
 
         logger.info(f"Memory statistics | "
@@ -361,7 +437,8 @@ class TPUWorker:
             jax.profiler.stop_trace()
 
     def load_model(self) -> None:
-        self.model_runner.load_model()
+        with nn_partitioning.axis_rules[MAXTEXT_LOGICAL_AXIS_RULES]:
+            self.model_runner.load_model()
 
     def compile_or_warm_up_model(self) -> None:
         self.model_runner.capture_model()
@@ -391,26 +468,51 @@ class TPUWorker:
         # responsible for this translation. When vLLM can be modified, this
         # method should be changed to return `dict[str, AbstractKVCacheSpec]`,
         # and the vLLM side should be updated to handle the translation.
-        return self.model_runner.get_kv_cache_spec()
+        kv_cache_specs = self.model_runner.get_kv_cache_spec()
+
+        if len(kv_cache_specs) == 0:
+            return kv_cache_specs
+
+        # TODO(kyuyeunk): Instead of checking page_size_bytes here, introduce
+        # feature that allows overriding page_size_bytes of KVCacheSpec.
+        vllm_page_size_bytes = get_uniform_page_size(
+            list(kv_cache_specs.values()))
+        attention_page_size_bytes = get_attention_page_size_bytes(
+            self.model_runner.mesh, kv_cache_specs)
+
+        if vllm_page_size_bytes != attention_page_size_bytes:
+            logger.info(
+                f"KV cache page size calculated by vLLM "
+                f"({vllm_page_size_bytes} Bytes) does not match with actual "
+                f"page size used by Attention kernel ({attention_page_size_bytes} Bytes). "
+                f"Recalculating number of KV blocks using actual page size.")
+
+            available_memory = self.determine_available_memory()
+            num_blocks = get_num_blocks(self.vllm_config, len(kv_cache_specs),
+                                        available_memory,
+                                        attention_page_size_bytes)
+            cache_config = self.vllm_config.cache_config
+            cache_config.num_gpu_blocks_override = num_blocks
+
+        return kv_cache_specs
+
+    def get_kv_connector_handshake_metadata(self) -> dict | None:
+        """Get KV connector metadata from this worker if available."""
+        # NOTE: we are not using it right now.
+        return
 
     def initialize_from_config(
         self,
         kv_cache_config: KVCacheConfig,
     ) -> None:
         """Allocate GPU KV cache with the specified kv_cache_config."""
-        # Precompile functions with large vocab_size tensors before allocating KV cache to avoid OOM
-        if not (envs.SKIP_JAX_PRECOMPILE or
-                (hasattr(self.model_runner.model_config, "enforce_eager")
-                 and self.model_runner.model_config.enforce_eager)):
-            self.model_runner.compilation_manager._precompile_sampling()
-            self.model_runner.compilation_manager._precompile_gather_logprobs()
-        self.model_runner.initialize_kv_cache(kv_cache_config,
-                                              self.topology_order_id)
+        self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def get_node_kv_ip_port(self) -> tuple[int, str, int]:
+        node_id = get_node_id()
         ip = get_host_ip()
         port = get_kv_transfer_port()
-        return (int(self.topology_order_id), ip, int(port))
+        return (int(node_id), ip, int(port))
 
     def check_health(self) -> None:
         # worker will always be healthy as long as it's running.
@@ -432,8 +534,3 @@ class TPUWorker:
 
     def shutdown(self) -> None:
         return
-
-    # Ray executor do not need handshake metadata
-    # as we pass the kv_parameters through proxy server
-    def get_kv_connector_handshake_metadata(self) -> None:
-        pass
