@@ -31,9 +31,53 @@ from tpu_inference.logger import init_logger
 from tpu_inference.models.jax.jax_intermediate_tensor import \
     JaxIntermediateTensors
 from tpu_inference.runner.tpu_runner import TPUModelRunner
+from flax.linen import partitioning as nn_partitioning
 
 logger = init_logger(__name__)
 
+MAXTEXT_LOGICAL_AXIS_RULES = [
+                      ['activation_batch', ['expert']],
+                      ['activation_batch_no_exp', []],
+                      ['activation_embed_and_logits_batch', ['expert']],
+                      ['activation_embed_and_logits_batch_sequence', ['expert']],
+                      ['activation_heads', ['model']],
+                      ['activation_kv_heads', ['model']],
+                      ['activation_attn_length', ['expert']],
+                      ['activation_attn_length_no_exp', []],
+                      ['activation_length', ['data', 'expert']],
+                      ['activation_length_no_exp', 'data'],
+                      ['activation_q_length', ['expert', 'attn_dp_expert']],
+                      ['activation_attn_embed', 'model'],
+                      ['activation_embed', ['model', 'attn_dp']],
+                      ['activation_mlp', ['model', 'attn_dp']],
+                      ['activation_kv', ['model']],
+                      ['activation_prefill_kv_batch', ['expert', 'attn_dp_expert']],
+                      ['activation_kv_batch', ['expert', 'attn_dp_expert']],
+                      ['activation_kv_batch_no_exp', []],
+                      ['activation_kv_head_dim', ['model']],
+                      ['activation_vocab', ['model', 'attn_dp']],
+                      ['activation_norm_length', []],
+                      ['activation_exp', ['expert', 'attn_dp_expert']],
+                      ['decode_batch', ['expert', 'attn_dp_expert']],
+                      ['decode_length', []],
+                      ['mlp', ['model', 'attn_dp']],
+                      ['mlp_no_fsdp', ['model', 'attn_dp']],
+                      ['vocab', ['model', 'attn_dp']],
+                      ['heads', ['model']],
+                      ['q_heads', ['model']],
+                      ['kv_heads', ['model']],
+                      ['kv_head_dim', []],
+                      ['kv', []],
+                      ['embed', ['expert', 'attn_dp_expert']],
+                      ['embed_tensor_transpose', ['attn_dp', 'model']],
+                      ['embed_no_exp', []],
+                      ['q_lora', ['expert', 'attn_dp_expert']],
+                      ['kv_lora', ['expert', 'attn_dp_expert']],
+                      ['norm', []],
+                      ['cache_heads', ['model']],
+                      ['exp', ['expert', 'attn_dp_expert']],
+                      ['paged_kv_heads', ['model']],
+                    ]
 
 @dataclass
 class PPConfig:
@@ -361,7 +405,8 @@ class TPUWorker:
             jax.profiler.stop_trace()
 
     def load_model(self) -> None:
-        self.model_runner.load_model()
+        with nn_partitioning.axis_rules(MAXTEXT_LOGICAL_AXIS_RULES):
+            self.model_runner.load_model()
 
     def compile_or_warm_up_model(self) -> None:
         self.model_runner.capture_model()
