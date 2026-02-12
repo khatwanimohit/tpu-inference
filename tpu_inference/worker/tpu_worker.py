@@ -62,6 +62,7 @@ MAXTEXT_LOGICAL_AXIS_RULES = [
                       ['decode_length', []],
                       ['mlp', ['model', 'attn_dp']],
                       ['mlp_no_fsdp', ['model', 'attn_dp']],
+                      ['moe_mlp', ['model', 'attn_dp']],
                       ['vocab', ['model', 'attn_dp']],
                       ['heads', ['model']],
                       ['q_heads', ['model']],
