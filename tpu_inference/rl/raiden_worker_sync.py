@@ -276,6 +276,12 @@ class RaidenWorkerSync:
         Shaped to satisfy `tunix.experimental.orchestrator.weight_sync.dict_to_metadata`
         on the receiving (tunix) side of the RPC boundary.
         """
+        # Positional index, NOT _layer_idx_from_name -- see the matching
+        # revert + explanation in tunix's raiden_synchronizer.py: the regex
+        # fallback (0 for any non-per-layer name) collides with layer 0's
+        # own tensors in the native transport's per-layer buffer indexing,
+        # causing "Push range out of bounds". Reverted on both sides so
+        # trainer and destination agree.
         variables = [
             _tensor_metadata_dict(name, arr, idx)
             for idx, (name, arr) in enumerate(zip(self.names, self.arrays))
