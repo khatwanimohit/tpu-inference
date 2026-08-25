@@ -1385,6 +1385,15 @@ def static_validate_inputs(
         kv_cache.dtype,
     )
 
+    import sys as _sys
+    print(
+        f"DEBUG_KVCACHE static_validate_inputs: actual_num_kv_heads(from k.shape[1])="
+        f"{actual_num_kv_heads} actual_head_dim={actual_head_dim} "
+        f"kv_cache.shape(local, in-shard_map)={kv_cache.shape} "
+        f"expected_kv_cache_shape={expected_kv_cache_shape} "
+        f"k.shape={k.shape} q.shape={q.shape}",
+        file=_sys.stderr, flush=True)
+
     if kv_cache.shape != expected_kv_cache_shape:
         raise ValueError(
             f"Expected {kv_cache.shape=} to be equal to {expected_kv_cache_shape=}"

@@ -97,6 +97,12 @@ def get_kv_cache_shape_with_mesh(mesh: Mesh,
             get_kv_cache_shape_fn(total_num_pages, physical_block_size,
                                   actual_num_kv_heads // model_cnt,
                                   actual_head_dim, kv_dtype))
+        logger.info(
+            "DEBUG_KVCACHE get_kv_cache_shape_with_mesh: actual_num_kv_heads=%s "
+            "model_cnt(KV_HEAD axis)=%s per_shard_passed_to_kernel_fn=%s "
+            "shape_before_remultiply=%s KV_HEAD_axis_names=%s",
+            actual_num_kv_heads, model_cnt, actual_num_kv_heads // model_cnt,
+            shape, ShardingAxisName.KV_HEAD)
         shape[2] *= model_cnt
     return tuple(shape)
 
@@ -187,9 +193,23 @@ def create_kv_caches(
             PartitionSpec(ShardingAxisName.BATCH, ShardingAxisName.KV_CONTEXT,
                           ShardingAxisName.KV_HEAD))
 
+    logger.info(
+        "DEBUG_KVCACHE create_kv_caches: num_kv_heads(in)=%s cache_shape(global)=%s "
+        "sharding=%s mesh_kv_head_size=%s mesh=%s", num_kv_heads, cache_shape,
+        sharding, utils.get_mesh_shape_product(mesh, ShardingAxisName.KV_HEAD),
+        mesh)
+
     sharded_allocate = _get_kv_cache_allocator(cache_shape, cache_dtype,
                                                sharding)
-    return [sharded_allocate() for _ in layer_names]
+    arrays = [sharded_allocate() for _ in layer_names]
+    if arrays:
+        a = arrays[0]
+        logger.info(
+            "DEBUG_KVCACHE create_kv_caches: allocated global_shape=%s "
+            "local_shape=%s sharding=%s", a.shape,
+            a.addressable_shards[0].data.shape if a.addressable_shards else None,
+            a.sharding)
+    return arrays
 
 
 def create_kv_cache_of_shape(
